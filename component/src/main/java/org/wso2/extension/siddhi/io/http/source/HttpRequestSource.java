@@ -566,12 +566,16 @@ public class HttpRequestSource extends HttpSource {
 
         HttpCarbonMessage carbonMessage = requestContainerMap.get(messageId);
         if (carbonMessage != null) {
-            // Remove the message from the map as we are going to reply to the message.
-            requestContainerMap.remove(messageId);
-            // Remove the timeout task as are replying to the message.
-            removeTimeout(messageId);
-            // Send the response to the correlating message.
-            handleResponse(carbonMessage, 200, payload, headersList, contentType);
+            try {
+                // Remove the message from the map as we are going to reply to the message.
+                requestContainerMap.remove(messageId);
+                // Remove the timeout task as are replying to the message.
+                removeTimeout(messageId);
+                // Send the response to the correlating message.
+                handleResponse(carbonMessage, 200, payload, headersList, contentType);
+            } finally {
+                carbonMessage.waitAndReleaseAllEntities();
+            }
         } else {
             log.warn("No source message found for source: " + sourceId + " and message: " + messageId);
         }
@@ -595,6 +599,8 @@ public class HttpRequestSource extends HttpSource {
             requestMsg.respond(responseMsg);
         } catch (ServerConnectorException e) {
             throw new HttpSourceAdaptorRuntimeException("Error occurred during response", e);
+        } finally {
+            requestMsg.waitAndReleaseAllEntities();
         }
     }
 

@@ -66,25 +66,31 @@ public class HttpResponseMessageListener implements HttpConnectorListener {
 
     @Override
     public void onMessage(HttpCarbonMessage carbonMessage) {
-        trpProperties.forEach((k, v) -> {
-            carbonMessage.setProperty(k, v);
-        });
-        carbonMessage.setProperty(HttpConstants.IS_DOWNLOADABLE_CONTENT, isDownloadEnabled);
-        this.carbonMessages = carbonMessage;
-        String statusCode = Integer.toString(carbonMessage.getNettyHttpResponse().status().code());
-        if (carbonMessage.getNettyHttpResponse().status().code() == (HttpConstants.SUCCESS_CODE) ||
-                HttpConstants.MAXIMUM_TRY_COUNT == tryCount) {
-            HttpResponseSource responseSource = findAndGetResponseSource(statusCode);
-            if (responseSource != null) {
-                responseConnectorListener = responseSource.getConnectorListener();
-                responseConnectorListener.onMessage(carbonMessage);
-            } else {
-                log.error("No source of type 'http-response' that matches with the status code '" + statusCode +
-                        "' has been defined. Hence dropping the response message.");
+        try {
+            trpProperties.forEach((k, v) -> {
+                carbonMessage.setProperty(k, v);
+            });
+            carbonMessage.setProperty(HttpConstants.IS_DOWNLOADABLE_CONTENT, isDownloadEnabled);
+            this.carbonMessages = carbonMessage;
+            String statusCode = Integer.toString(carbonMessage.getNettyHttpResponse().status().code());
+            if (carbonMessage.getNettyHttpResponse().status().code() == (HttpConstants.SUCCESS_CODE) ||
+                    HttpConstants.MAXIMUM_TRY_COUNT == tryCount) {
+                HttpResponseSource responseSource = findAndGetResponseSource(statusCode);
+                if (responseSource != null) {
+                    responseConnectorListener = responseSource.getConnectorListener();
+                    responseConnectorListener.onMessage(carbonMessage);
+                } else {
+                    log.error("No source of type 'http-response' that matches with the status code '" + statusCode +
+                            "' has been defined. Hence dropping the response message.");
+                }
             }
-        }
-        if (isBlockingIO || HttpConstants.OAUTH.equals(authType)) {
-            latch.countDown();
+            if (isBlockingIO || HttpConstants.OAUTH.equals(authType)) {
+                latch.countDown();
+            }
+        } finally {
+            if (carbonMessage != null) {
+                carbonMessage.waitAndReleaseAllEntities();
+            }
         }
     }
 

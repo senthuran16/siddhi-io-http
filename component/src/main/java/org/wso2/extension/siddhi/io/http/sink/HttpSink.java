@@ -944,29 +944,37 @@ public class HttpSink extends Sink {
             cMessage.addHttpContent(new DefaultLastHttpContent(Unpooled.wrappedBuffer(messageBody
                     .getBytes(Charset.defaultCharset()))));
         }
-        cMessage.completeMessage();
-        if (HttpConstants.OAUTH.equals(authType)) {
-            CountDownLatch latch = new CountDownLatch(1);
-            DefaultListener listener = new DefaultListener(latch, authType);
-            HttpResponseFuture responseFuture = clientConnector.send(cMessage);
-            responseFuture.setHttpConnectorListener(listener);
-            try {
-                boolean latchCount = latch.await(30, TimeUnit.SECONDS);
-                if (!latchCount) {
-                    log.debug("Time out due to getting getting response from " + publisherURL + ". Message dropped.");
-                    throw new HttpSinkAdaptorRuntimeException("Time out due to getting getting response from "
-                            + publisherURL + ". Message dropped.");
+
+        try {
+                cMessage.completeMessage();
+                if (HttpConstants.OAUTH.equals(authType)) {
+                        CountDownLatch latch = new CountDownLatch(1);
+                        DefaultListener listener = new DefaultListener(latch, authType);
+                        HttpResponseFuture responseFuture = clientConnector.send(cMessage);
+                        responseFuture.setHttpConnectorListener(listener);
+                        try {
+                                boolean latchCount = latch.await(30, TimeUnit.SECONDS);
+                                if (!latchCount) {
+                                        log.debug("Time out due to getting getting response from " + publisherURL +
+                                            ". Message dropped.");
+                                        throw new HttpSinkAdaptorRuntimeException(
+                                            "Time out due to getting getting response from "
+                                            + publisherURL + ". Message dropped.");
+                                }
+                        } catch (InterruptedException e) {
+                                log.debug("Failed to get a response from " + publisherURL + "," + e +
+                                    ". Message dropped.");
+                                throw new HttpSinkAdaptorRuntimeException("Failed to get a response from " +
+                                    publisherURL + ", " + e + ". Message dropped.");
+                        }
+                        HttpCarbonMessage response = listener.getHttpResponseMessage();
+                        return response.getNettyHttpResponse().status().code();
+                } else {
+                        clientConnector.send(cMessage);
+                        return HttpConstants.SUCCESS_CODE;
                 }
-            } catch (InterruptedException e) {
-                log.debug("Failed to get a response from " + publisherURL + "," + e + ". Message dropped.");
-                throw new HttpSinkAdaptorRuntimeException("Failed to get a response from " +
-                        publisherURL + ", " + e + ". Message dropped.");
-            }
-            HttpCarbonMessage response = listener.getHttpResponseMessage();
-            return response.getNettyHttpResponse().status().code();
-        } else {
-            clientConnector.send(cMessage);
-            return HttpConstants.SUCCESS_CODE;
+        } finally {
+                cMessage.waitAndReleaseAllEntities();
         }
     }
 

@@ -53,17 +53,23 @@ public class HttpResponseConnectorListener implements HttpConnectorListener {
 
     @Override
     public void onMessage(HttpCarbonMessage carbonMessage) {
-        String[] properties = new String[trpPropertyNames.length];
-        for (int i = 0; i < trpPropertyNames.length; i++) {
-            Object property = carbonMessage.getProperty(trpPropertyNames[i]);
-            if (property != null) {
-                properties[i] = carbonMessage.getProperty(trpPropertyNames[i]).toString();
+        try {
+            String[] properties = new String[trpPropertyNames.length];
+            for (int i = 0; i < trpPropertyNames.length; i++) {
+                Object property = carbonMessage.getProperty(trpPropertyNames[i]);
+                if (property != null) {
+                    properties[i] = carbonMessage.getProperty(trpPropertyNames[i]).toString();
+                }
+            }
+            HttpResponseProcessor workerThread =
+                    new HttpResponseProcessor(carbonMessage, sourceEventListener, shouldAllowStreamingResponses,
+                            sinkId, properties);
+            executorService.execute(workerThread);
+        } finally {
+            if (carbonMessage != null) {
+                carbonMessage.waitAndReleaseAllEntities();
             }
         }
-        HttpResponseProcessor workerThread =
-                new HttpResponseProcessor(carbonMessage, sourceEventListener, shouldAllowStreamingResponses,
-                        sinkId, properties);
-        executorService.execute(workerThread);
     }
 
     @Override
