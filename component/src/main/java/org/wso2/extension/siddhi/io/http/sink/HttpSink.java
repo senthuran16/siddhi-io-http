@@ -51,6 +51,7 @@ import org.wso2.siddhi.core.util.transport.OptionHolder;
 import org.wso2.siddhi.query.api.definition.StreamDefinition;
 import org.wso2.transport.http.netty.contract.Constants;
 import org.wso2.transport.http.netty.contract.HttpClientConnector;
+import org.wso2.transport.http.netty.contract.HttpConnectorListener;
 import org.wso2.transport.http.netty.contract.HttpResponseFuture;
 import org.wso2.transport.http.netty.contract.HttpWsConnectorFactory;
 import org.wso2.transport.http.netty.contract.config.ChunkConfig;
@@ -59,7 +60,12 @@ import org.wso2.transport.http.netty.contract.config.SenderConfiguration;
 import org.wso2.transport.http.netty.contractimpl.DefaultHttpWsConnectorFactory;
 import org.wso2.transport.http.netty.contractimpl.sender.channel.pool.PoolConfiguration;
 import org.wso2.transport.http.netty.message.HttpCarbonMessage;
+import org.wso2.transport.http.netty.message.HttpMessageDataStreamer;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
@@ -69,6 +75,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.wso2.extension.siddhi.io.http.util.HttpConstants.EMPTY_STRING;
@@ -570,6 +578,7 @@ public class HttpSink extends Sink {
     private int numberOfPools;
     private long maxWaitTime;
     private String hostnameVerificationEnabled;
+    private final Executor executor = Executors.newFixedThreadPool(500);
 
     private HttpWsConnectorFactory httpConnectorFactory;
 
@@ -965,9 +974,47 @@ public class HttpSink extends Sink {
             HttpCarbonMessage response = listener.getHttpResponseMessage();
             return response.getNettyHttpResponse().status().code();
         } else {
-            clientConnector.send(cMessage);
+            HttpConnectorListener listener = new HttpConnectorListener() {
+                @Override
+                public void onMessage(HttpCarbonMessage httpCarbonMessage) {
+                    executor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            /*
+                            Read content from the input stream of the HTTP Carbon message
+                            and make sure that the Carbon message is cleaned up,
+                            for preventing leaks.
+                             */
+                            getStringFromInputStream(
+                                new HttpMessageDataStreamer(httpCarbonMessage).getInputStream());
+                        }
+                    });
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    log.error("Error in http server connector", throwable);
+                }
+            };
+            clientConnector.send(cMessage).setHttpConnectorListener(listener);
             return HttpConstants.SUCCESS_CODE;
         }
+    }
+
+    private String getStringFromInputStream(InputStream in) {
+        BufferedInputStream bis = new BufferedInputStream(in);
+        String result;
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            int data;
+            while ((data = bis.read()) != -1) {
+                bos.write(data);
+            }
+            result = bos.toString(StandardCharsets.UTF_8.toString());
+        } catch (IOException ioe) {
+            log.error("Couldn't read the complete input stream");
+            return "";
+        }
+        return result;
     }
 
     /**
